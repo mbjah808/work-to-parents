@@ -95,6 +95,11 @@ export async function signIn(): Promise<string> {
             reject(new Error(resp.error || 'Google sign-in was cancelled'))
             return
           }
+          const granted = (resp.scope || '').toLowerCase()
+          if (!granted.includes('gmail.send')) {
+            reject(new Error('Google did not allow sending email. Sign in again and allow Send email on your behalf.'))
+            return
+          }
           const expiresIn = Number(resp.expires_in || 3600)
           const email = await fetchEmail(resp.access_token)
           saveToken({
@@ -106,7 +111,7 @@ export async function signIn(): Promise<string> {
         })()
       },
     })
-    client.requestAccessToken({ prompt: 'consent' })
+    client.requestAccessToken({ prompt: 'consent', enable_granular_consent: false })
   })
 }
 
@@ -184,6 +189,10 @@ export async function sendWorkEmail(opts: {
     if (res.status === 401) {
       sessionStorage.removeItem(TOKEN_KEY)
       throw new Error('Google session expired. Sign in again.')
+    }
+    if (res.status === 403) {
+      sessionStorage.removeItem(TOKEN_KEY)
+      throw new Error('Google blocked Gmail send. Sign out, sign in again, and allow Send email on your behalf.')
     }
     throw new Error(`Gmail send failed (${res.status}). ${errText.slice(0, 180)}`)
   }

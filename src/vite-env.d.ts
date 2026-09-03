@@ -10,7 +10,7 @@ interface ImportMeta {
 }
 
 interface TokenClient {
-  requestAccessToken: (override?: { prompt?: string }) => void
+  requestAccessToken: (override?: { prompt?: string; enable_granular_consent?: boolean }) => void
 }
 
 interface GoogleAccounts {
@@ -18,7 +18,7 @@ interface GoogleAccounts {
     initTokenClient: (config: {
       client_id: string
       scope: string
-      callback: (resp: { access_token?: string; error?: string; expires_in?: string }) => void
+      callback: (resp: { access_token?: string; error?: string; expires_in?: string; scope?: string }) => void
     }) => TokenClient
     revoke: (token: string, done?: () => void) => void
   }
