@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  base: '/work-to-parents/',
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
@@ -14,8 +15,8 @@ export default defineConfig({
         background_color: '#0f3d4c',
         display: 'standalone',
         orientation: 'any',
-        start_url: '/',
-        scope: '/',
+        start_url: '/work-to-parents/',
+        scope: '/work-to-parents/',
         icons: [
           { src: 'pwa-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'pwa-512.png', sizes: '512x512', type: 'image/png' },

@@ -35,3 +35,13 @@ The token is session-only. Photos are not stored; they attach only at send time.
 ## Stack
 
 Vite, vanilla TypeScript, Vite PWA plugin (manifest + service worker). No App Store.
+
+## Live site (iPad)
+
+
+
+https://mbjah808.github.io/work-to-parents/
+
+
+
+On the iPad: Safari, open that link, then Share, Add to Home Screen.
