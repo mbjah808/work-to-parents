@@ -252,7 +252,7 @@ function renderCapture(): HTMLElement {
     el(
       'p',
       { class: 'lead' },
-      'Photograph a paper, tap the student, confirm, send. Photo is discarded after send — not stored.',
+      'Photograph a paper, tap the student, it emails the parent. Photo is discarded after send — not stored.',
     ),
   )
   body.append(googleBar())
@@ -323,6 +323,7 @@ function renderPick(): HTMLElement {
   if (state.capture) {
     body.append(el('img', { class: 'thumb', src: state.capture.url, alt: 'Captured student work' }))
   }
+  body.append(googleBar())
   const search = el('input', {
     class: 'search',
     type: 'search',
@@ -362,15 +363,24 @@ function renderPick(): HTMLElement {
       if (s.notes) row.append(el('span', { class: 'student-notes' }, s.notes))
       row.addEventListener('click', () => {
         state.selected = s
-        state.screen = 'confirm'
         state.error = ''
-        render()
+        if (googleConfigured() && isSignedIn()) {
+          void doSendGmail()
+        } else if (googleConfigured()) {
+          state.error = 'Sign in with Google on the Capture screen first. Then tap a name to send.'
+          render()
+        } else {
+          state.screen = 'confirm'
+          render()
+        }
       })
       list.append(row)
     }
   }
   renderList()
   body.append(list)
+  if (state.busy) body.append(el('p', { class: 'hint' }, 'Sending…'))
+  if (state.error) body.append(el('p', { class: 'error' }, state.error))
   main.append(body)
   queueMicrotask(() => search.focus())
   return main
