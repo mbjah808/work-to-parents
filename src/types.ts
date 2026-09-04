@@ -1,14 +1,18 @@
-export type Student = {
+export type Screen = 'unlock' | 'setup' | 'gallery' | 'capture' | 'review' | 'settings'
+
+export type Photo = {
   id: string
-  name: string
-  parentEmail: string
-  notes: string
+  caption: string
+  createdAt: string
+  url: string
+  /** Storage path / blob key; used for deletes and cloud sync */
+  path: string
 }
 
-export type Capture = {
+export type PhotoDraft = {
   blob: Blob
   url: string
   filename: string
 }
 
-export type Screen = 'capture' | 'pick' | 'confirm' | 'roster'
+export type StorageMode = 'local' | 'supabase'

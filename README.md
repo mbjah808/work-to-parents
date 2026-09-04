@@ -1,47 +1,43 @@
-# Work to Parents
+# Class Photo Wall
 
-iPad PWA for photographing student work and emailing it to parents.
+Mobile-first PWA for classroom iPads: take a photo then it appears on a shared class photo wall.
 
-No face recognition. Photos stay in memory then are discarded.
+**No student roster. No tapping names. No Gmail send for the core flow.**
 
-The roster (name, parent email, notes) stays on this iPad in browser storage.
+Parents open one gallery link and enter the class PIN.
+
+Live site: https://mbjah808.github.io/work-to-parents/
 
 ## Classroom flow
 
-1. Safari: Add to Home Screen.
-2. Take photo of the paper.
-3. Tap the student. Confirm.
-4. Send with Gmail if signed in. Otherwise use Share from iPad or Download.
-A mail link cannot attach files on iOS; this app does not pretend it can.
+1. **Teacher (iPad Safari):** open the site, Share, Add to Home Screen.
+2. First launch: create a **class PIN** (4+ characters). Share that PIN with families.
+3. Tap **Take photo** (rear camera) or **Choose from Photos**.
+4. Optional short caption, then **Upload** (or **Upload without caption** for a fast path).
+5. Photos show on a masonry **photo wall**, newest first. Tap a photo for full-screen view.
 
-CSV import/export columns: name, parent_email, notes.
-Empty roster explains import. Sample names must include EXAMPLE.
-See public/sample-roster.csv.
+Parents use the same link and PIN to view (v1 uses one shared class PIN for view and upload).
 
-## Run
+## Privacy (classroom-trust)
 
-Use package.json scripts: install, then the dev script, then the build script. Node 20+. No backend for v1.
-Copy .env.example to .env and set VITE_GOOGLE_CLIENT_ID, then rebuild.
+The PIN is a soft gate stored as a SHA-256 hash in the browser (localStorage). It is **not** bank-grade auth.
 
-## Google Cloud setup (preferred Gmail send)
+- Share the gallery link and PIN only with your class families.
+- For cloud mode, anyone with the Supabase anon key in the built JS can call the API; treat this as a trusted-classroom MVP.
 
-Set VITE_GOOGLE_CLIENT_ID to a Web application OAuth client id, then rebuild.
-In Google Cloud: enable Gmail API; consent screen (Internal for Workspace schools);
-scopes gmail.send and userinfo.email; authorized JavaScript origins with no path:
-http://localhost:5173 , http://localhost:4173 , and the https production origin.
-Redirect URIs are not required for the GIS token-client flow.
-The token is session-only. Photos are not stored; they attach only at send time.
+## Storage
+
+- **Local demo** (default): IndexedDB on that device only when Supabase env vars are unset.
+- **Cloud**: set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY at build time. Photos go to Supabase Storage bucket `class-photos` plus a `photos` table.
+
+## Run locally
+Use package scripts: install, then the dev script, then the build script. Node 20+.
+Vite base is /work-to-parents/ for GitHub Pages.
+
+## Cloud gallery
+
+Optional shared gallery: set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, create public bucket class-photos, apply docs/supabase-setup.sql. Without env vars the app uses IndexedDB demo mode on this device.
 
 ## Stack
 
-Vite, vanilla TypeScript, Vite PWA plugin (manifest + service worker). No App Store.
-
-## Live site (iPad)
-
-
-
-https://mbjah808.github.io/work-to-parents/
-
-
-
-On the iPad: Safari, open that link, then Share, Add to Home Screen.
+Vite, vanilla TypeScript, Vite PWA. Roster, CSV, and Gmail send were removed from the core product.

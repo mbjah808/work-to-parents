@@ -8,9 +8,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'pwa-192.png', 'pwa-512.png'],
       manifest: {
-        name: 'Work to Parents',
-        short_name: 'Work→Parents',
-        description: 'Photograph student work and email it to parents',
+        name: 'Class Photo Wall',
+        short_name: 'Class Wall',
+        description: 'Teachers snap classroom photos; parents view the shared gallery',
         theme_color: '#0f3d4c',
         background_color: '#0f3d4c',
         display: 'standalone',
