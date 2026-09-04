@@ -34,9 +34,17 @@ function publicUrl(path: string): string {
 
 export async function fetchCloudPinHash(): Promise<string | null> {
   const { url } = config()
-  const res = await fetch(`${url}/rest/v1/wall_config?id=eq.1&select=pin_hash`, {
-    headers: headers({ Accept: 'application/json' }),
-  })
+  let res: Response
+  try {
+    res = await fetch(`${url}/rest/v1/wall_config?id=eq.1&select=pin_hash`, {
+      headers: headers({ Accept: 'application/json' }),
+    })
+  } catch (err) {
+    if (err instanceof TypeError) {
+      throw new Error('Could not reach photo cloud. Clear Safari cache for this site or reopen the link (old app used a broken address).')
+    }
+    throw err
+  }
   if (!res.ok) {
     const text = await res.text()
     throw new Error(`Could not load class PIN (${res.status}): ${text.slice(0, 160)}`)
@@ -67,10 +75,18 @@ export async function saveCloudPinHash(pinHash: string): Promise<void> {
 
 export async function listCloudPhotos(): Promise<Photo[]> {
   const { url } = config()
-  const res = await fetch(
-    `${url}/rest/v1/photos?select=id,caption,created_at,storage_path&order=created_at.desc`,
-    { headers: headers({ Accept: 'application/json' }) },
-  )
+  let res: Response
+  try {
+    res = await fetch(
+      `${url}/rest/v1/photos?select=id,caption,created_at,storage_path&order=created_at.desc`,
+      { headers: headers({ Accept: 'application/json' }) },
+    )
+  } catch (err) {
+    if (err instanceof TypeError) {
+      throw new Error('Could not reach photo cloud. Clear Safari cache for this site or reopen the link (old app used a broken address).')
+    }
+    throw err
+  }
   if (!res.ok) {
     const text = await res.text()
     throw new Error(`Could not load gallery (${res.status}): ${text.slice(0, 160)}`)
