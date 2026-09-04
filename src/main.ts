@@ -26,7 +26,7 @@ function parentViewUrl(): string {
 type State = {
   screen: Screen
   photos: Photo[]
-  draft: PhotoDraft | null
+  drafts: PhotoDraft[]
   caption: string
   pinInput: string
   pinConfirm: string
@@ -37,12 +37,14 @@ type State = {
   loadingGallery: boolean
   booting: boolean
   viewOnly: boolean
+  selectMode: boolean
+  selectedIds: Set<string>
 }
 
 const state: State = {
   screen: 'unlock',
   photos: [],
-  draft: null,
+  drafts: [],
   caption: '',
   pinInput: '',
   pinConfirm: '',
@@ -53,6 +55,8 @@ const state: State = {
   loadingGallery: false,
   booting: true,
   viewOnly: detectViewOnly(),
+  selectMode: false,
+  selectedIds: new Set(),
 }
 
 function toast(msg: string): void {
@@ -66,11 +70,11 @@ function toast(msg: string): void {
   }, 2600)
 }
 
-function discardDraft(): void {
-  if (state.draft) {
-    URL.revokeObjectURL(state.draft.url)
-    state.draft = null
+function discardDrafts(): void {
+  for (const d of state.drafts) {
+    URL.revokeObjectURL(d.url)
   }
+  state.drafts = []
   state.caption = ''
 }
 
@@ -117,20 +121,24 @@ function go(screen: Screen): void {
   if (state.viewOnly && (screen === 'capture' || screen === 'review' || screen === 'setup')) {
     screen = 'gallery'
   }
+  if (screen !== 'gallery' && state.selectMode) exitSelectMode()
   state.screen = screen
   state.error = ''
   render()
   if (screen === 'gallery') void refreshGallery()
 }
 
-function onPhotoFile(file: File): void {
+function onPhotoFiles(files: FileList | File[]): void {
   if (state.viewOnly) return
-  discardDraft()
-  state.draft = {
+  const list = [...files].filter((f) => f.type.startsWith('image/') || !f.type)
+  if (list.length === 0) return
+  discardDrafts()
+  const now = Date.now()
+  state.drafts = list.map((file, i) => ({
     blob: file,
     url: URL.createObjectURL(file),
-    filename: file.name || `photo-${Date.now()}.jpg`,
-  }
+    filename: file.name || `photo-${now}-${i + 1}.jpg`,
+  }))
   state.caption = ''
   state.screen = 'review'
   state.error = ''
@@ -138,18 +146,32 @@ function onPhotoFile(file: File): void {
 }
 
 async function doUpload(skipCaption = false): Promise<void> {
-  if (state.viewOnly || !state.draft || state.busy) return
+  if (state.viewOnly || state.drafts.length === 0 || state.busy) return
   state.busy = true
   state.error = ''
   render()
+  const caption = skipCaption ? '' : state.caption.trim()
+  const total = state.drafts.length
+  let uploaded = 0
   try {
-    const caption = skipCaption ? '' : state.caption.trim()
-    await uploadPhoto(state.draft.blob, caption, state.draft.filename)
-    discardDraft()
-    toast('Photo added to the wall')
+    while (state.drafts.length > 0) {
+      const draft = state.drafts[0]
+      await uploadPhoto(draft.blob, caption, draft.filename)
+      URL.revokeObjectURL(draft.url)
+      state.drafts = state.drafts.slice(1)
+      uploaded += 1
+      render()
+    }
+    state.caption = ''
+    toast(uploaded === 1 ? 'Photo added to the wall' : `${uploaded} photos added`)
     go('gallery')
   } catch (err) {
-    state.error = err instanceof Error ? err.message : 'Upload failed'
+    state.error =
+      err instanceof Error
+        ? uploaded > 0
+          ? `${uploaded} of ${total} uploaded, then failed: ${err.message}`
+          : err.message
+        : 'Upload failed'
     state.busy = false
     render()
     return
@@ -171,6 +193,69 @@ async function doDelete(photo: Photo): Promise<void> {
     toast('Photo removed')
   } catch (err) {
     state.error = err instanceof Error ? err.message : 'Delete failed'
+  } finally {
+    state.busy = false
+    render()
+  }
+}
+
+
+function exitSelectMode(): void {
+  state.selectMode = false
+  state.selectedIds = new Set()
+}
+
+function toggleSelectMode(): void {
+  if (state.viewOnly) return
+  if (state.selectMode) {
+    exitSelectMode()
+  } else {
+    state.selectMode = true
+    state.selectedIds = new Set()
+    state.lightbox = null
+  }
+  state.error = ''
+  render()
+}
+
+function togglePhotoSelection(id: string): void {
+  if (!state.selectMode || state.viewOnly) return
+  const next = new Set(state.selectedIds)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  state.selectedIds = next
+  render()
+}
+
+async function doDeleteSelected(): Promise<void> {
+  if (state.viewOnly || state.busy || !state.selectMode) return
+  const ids = [...state.selectedIds]
+  if (ids.length === 0) return
+  const n = ids.length
+  if (!window.confirm(`Remove ${n} photo${n === 1 ? '' : 's'} from the class wall?`)) return
+  state.busy = true
+  state.error = ''
+  render()
+  let removed = 0
+  try {
+    for (const id of ids) {
+      const photo = state.photos.find((p) => p.id === id)
+      if (!photo) {
+        state.selectedIds.delete(id)
+        continue
+      }
+      await removePhoto(photo)
+      if (photo.url.startsWith('blob:')) URL.revokeObjectURL(photo.url)
+      state.photos = state.photos.filter((p) => p.id !== photo.id)
+      state.selectedIds.delete(id)
+      if (state.lightbox?.id === photo.id) state.lightbox = null
+      removed += 1
+    }
+    toast(removed === 1 ? 'Photo removed' : `${removed} photos removed`)
+    exitSelectMode()
+  } catch (err) {
+    state.error = err instanceof Error ? err.message : 'Delete failed'
+    // Keep remaining selectedIds for retry
   } finally {
     state.busy = false
     render()
@@ -252,12 +337,23 @@ function renderSetup(): string {
 function renderGallery(): string {
   const mode = getStorageMode()
   const tiles = state.photos
-    .map(
-      (p) => `<button type="button" class="tile" data-id="${escapeHtml(p.id)}" aria-label="Open photo">
+    .map((p) => {
+      const selected = state.selectMode && state.selectedIds.has(p.id)
+      const selectClass = state.selectMode ? ` select-mode${selected ? ' selected' : ''}` : ''
+      const check = state.selectMode
+        ? `<span class="tile-check" aria-hidden="true">${selected ? '✓' : ''}</span>`
+        : ''
+      const aria = state.selectMode
+        ? selected
+          ? 'Deselect photo'
+          : 'Select photo'
+        : 'Open photo'
+      return `<button type="button" class="tile${selectClass}" data-id="${escapeHtml(p.id)}" aria-label="${aria}" aria-pressed="${selected ? 'true' : 'false'}">
+        ${check}
         <img src="${escapeHtml(p.url)}" alt="" loading="lazy" />
         ${p.caption ? `<span class="tile-cap">${escapeHtml(p.caption)}</span>` : ''}
-      </button>`,
-    )
+      </button>`
+    })
     .join('')
 
   const empty = !state.loadingGallery && state.photos.length === 0
@@ -279,15 +375,31 @@ function renderGallery(): string {
         <div class="mode-chip view-only">View only</div>
         <div class="mode-chip ${mode}">${mode === 'supabase' ? 'Cloud gallery' : 'Demo mode (this device)'}</div>
       </div>`
-    : `<div class="mode-chip ${mode}">${mode === 'supabase' ? 'Cloud gallery' : 'Demo mode (this device)'}</div>`
+    : `<div class="chip-row">
+        <div class="mode-chip ${mode}">${mode === 'supabase' ? 'Cloud gallery' : 'Demo mode (this device)'}</div>
+        ${
+          state.photos.length > 0
+            ? `<button type="button" class="icon-btn select-toggle${state.selectMode ? ' active' : ''}" id="btn-select">${state.selectMode ? 'Selecting…' : 'Select'}</button>`
+            : ''
+        }
+      </div>`
 
-  const settingsBtn = state.viewOnly
-    ? `<button type="button" class="icon-btn ghost" id="btn-settings">Settings</button>`
-    : `<button type="button" class="icon-btn ghost" id="btn-settings">Settings</button>`
+  const settingsBtn = `<button type="button" class="icon-btn ghost" id="btn-settings">Settings</button>`
 
-  const fab = state.viewOnly
-    ? ''
-    : `<div class="fab-bar">
+  const n = state.selectedIds.size
+  const selectBar =
+    !state.viewOnly && state.selectMode
+      ? `<div class="select-bar" role="toolbar" aria-label="Selection">
+        <span class="select-count">${n} selected</span>
+        <button type="button" class="btn danger" id="btn-delete-selected" ${state.busy || n === 0 ? 'disabled' : ''}>Delete selected</button>
+        <button type="button" class="btn secondary" id="btn-cancel-select" ${state.busy ? 'disabled' : ''}>Cancel</button>
+      </div>`
+      : ''
+
+  const fab =
+    state.viewOnly || state.selectMode
+      ? ''
+      : `<div class="fab-bar">
       <button type="button" class="btn primary big fab" id="btn-capture">Take photo</button>
     </div>`
 
@@ -297,8 +409,9 @@ function renderGallery(): string {
       settingsBtn,
       `<button type="button" class="icon-btn ghost" id="btn-lock">Lock</button>`,
     )}
-    <div class="body gallery-body${state.viewOnly ? ' view-only' : ''}">
+    <div class="body gallery-body${state.viewOnly ? ' view-only' : ''}${state.selectMode ? ' select-mode' : ''}">
       ${chips}
+      ${selectBar}
       ${state.error ? `<p class="error">${escapeHtml(state.error)}</p>` : ''}
       ${state.loadingGallery ? `<p class="muted center">Loading wall…</p>` : ''}
       ${empty}
@@ -328,7 +441,7 @@ function renderCapture(): string {
   if (state.viewOnly) return renderGallery()
   return `<div class="screen">
     ${topbar(
-      'Take a photo',
+      'Add photos',
       `<button type="button" class="icon-btn ghost" id="btn-back-gallery">Back</button>`,
       '',
     )}
@@ -336,39 +449,70 @@ function renderCapture(): string {
       <p class="lead">Snap classroom moments for the shared wall. Parents see them after you upload.</p>
       <label class="btn primary big file-btn">
         Take photo
-        <input id="file-camera" type="file" accept="image/*" capture="environment" hidden />
+        <input id="file-camera" type="file" accept="image/*" capture="environment" multiple hidden />
       </label>
       <label class="btn secondary big file-btn">
         Choose from Photos
-        <input id="file-library" type="file" accept="image/*" hidden />
+        <input id="file-library" type="file" accept="image/*" multiple hidden />
       </label>
-      <p class="hint">Uses the rear camera on iPad when available.</p>
+      <p class="hint">Pick several from Photos at once, or snap one with the rear camera on iPad.</p>
     </div>
   </div>`
 }
 
 function renderReview(): string {
-  if (state.viewOnly || !state.draft) return state.viewOnly ? renderGallery() : renderCapture()
+  if (state.viewOnly || state.drafts.length === 0) {
+    return state.viewOnly ? renderGallery() : renderCapture()
+  }
+  const multi = state.drafts.length > 1
+  const preview = multi
+    ? `<div class="multi-preview">
+        <p class="multi-count"><strong>${state.drafts.length}</strong> photos ready</p>
+        <div class="thumb-row">
+          ${state.drafts
+            .map(
+              (d) =>
+                `<div class="thumb"><img src="${escapeHtml(d.url)}" alt="" /></div>`,
+            )
+            .join('')}
+        </div>
+      </div>`
+    : `<div class="preview-wrap">
+        <img class="preview" src="${escapeHtml(state.drafts[0].url)}" alt="Preview" />
+      </div>`
+
+  const captionLabel = multi
+    ? 'Shared caption <span class="optional">(optional — applies to all)</span>'
+    : 'Caption <span class="optional">(optional)</span>'
+
+  const uploadLabel = state.busy
+    ? multi
+      ? `Uploading… (${state.drafts.length} left)`
+      : 'Uploading…'
+    : multi
+      ? `Upload all (${state.drafts.length})`
+      : 'Upload'
+
+  const fastLabel = multi ? 'Upload all without caption' : 'Upload without caption'
+
   return `<div class="screen">
     ${topbar(
-      'Add to wall',
-      `<button type="button" class="icon-btn ghost" id="btn-retake">Retake</button>`,
+      multi ? 'Add photos' : 'Add to wall',
+      `<button type="button" class="icon-btn ghost" id="btn-retake"${state.busy ? ' disabled' : ''}>${multi ? 'Cancel' : 'Retake'}</button>`,
       '',
     )}
     <div class="body review-body">
-      <div class="preview-wrap">
-        <img class="preview" src="${escapeHtml(state.draft.url)}" alt="Preview" />
-      </div>
+      ${preview}
       <label class="field">
-        <span>Caption <span class="optional">(optional)</span></span>
-        <input id="caption-input" type="text" maxlength="120" placeholder="e.g. Science fair builds" value="${escapeHtml(state.caption)}" />
+        <span>${captionLabel}</span>
+        <input id="caption-input" type="text" maxlength="120" placeholder="e.g. Science fair builds" value="${escapeHtml(state.caption)}" ${state.busy ? 'disabled' : ''} />
       </label>
       ${state.error ? `<p class="error">${escapeHtml(state.error)}</p>` : ''}
       <button type="button" class="btn primary big" id="btn-upload" ${state.busy ? 'disabled' : ''}>
-        ${state.busy ? 'Uploading…' : 'Upload'}
+        ${uploadLabel}
       </button>
       <button type="button" class="btn secondary" id="btn-upload-fast" ${state.busy ? 'disabled' : ''}>
-        Upload without caption
+        ${fastLabel}
       </button>
     </div>
   </div>`
@@ -567,6 +711,7 @@ function bind(): void {
   document.getElementById('btn-lock')?.addEventListener('click', () => {
     lockSession()
     state.pinInput = ''
+    exitSelectMode()
     go('unlock')
   })
   document.getElementById('btn-capture')?.addEventListener('click', () => {
@@ -575,20 +720,18 @@ function bind(): void {
   document.getElementById('btn-back-gallery')?.addEventListener('click', () => go('gallery'))
   document.getElementById('btn-retake')?.addEventListener('click', () => {
     if (state.viewOnly) return
-    discardDraft()
+    discardDrafts()
     go('capture')
   })
 
   const cam = document.getElementById('file-camera') as HTMLInputElement | null
   cam?.addEventListener('change', () => {
-    const f = cam.files?.[0]
-    if (f) onPhotoFile(f)
+    if (cam.files && cam.files.length > 0) onPhotoFiles(cam.files)
     cam.value = ''
   })
   const lib = document.getElementById('file-library') as HTMLInputElement | null
   lib?.addEventListener('change', () => {
-    const f = lib.files?.[0]
-    if (f) onPhotoFile(f)
+    if (lib.files && lib.files.length > 0) onPhotoFiles(lib.files)
     lib.value = ''
   })
 
@@ -600,9 +743,21 @@ function bind(): void {
   document.getElementById('btn-upload')?.addEventListener('click', () => void doUpload(false))
   document.getElementById('btn-upload-fast')?.addEventListener('click', () => void doUpload(true))
 
+  document.getElementById('btn-select')?.addEventListener('click', () => toggleSelectMode())
+  document.getElementById('btn-cancel-select')?.addEventListener('click', () => {
+    exitSelectMode()
+    render()
+  })
+  document.getElementById('btn-delete-selected')?.addEventListener('click', () => void doDeleteSelected())
+
   document.querySelectorAll('.tile').forEach((el) => {
     el.addEventListener('click', () => {
       const id = (el as HTMLElement).dataset.id
+      if (!id) return
+      if (state.selectMode && !state.viewOnly) {
+        togglePhotoSelection(id)
+        return
+      }
       const photo = state.photos.find((p) => p.id === id) ?? null
       state.lightbox = photo
       render()
