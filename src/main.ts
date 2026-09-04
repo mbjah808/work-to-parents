@@ -6,6 +6,23 @@ import { getStorageMode, listPhotos, removePhoto, uploadPhoto } from './storage'
 
 registerSW({ immediate: true })
 
+function detectViewOnly(): boolean {
+  const params = new URLSearchParams(location.search)
+  const view = (params.get('view') || '').toLowerCase()
+  const mode = (params.get('mode') || '').toLowerCase()
+  return view === '1' || view === 'true' || view === 'parent' || mode === 'view'
+}
+
+function galleryBaseUrl(): string {
+  const base = import.meta.env.BASE_URL || '/'
+  return `${location.origin}${base}`
+}
+
+function parentViewUrl(): string {
+  const base = galleryBaseUrl()
+  return base.includes('?') ? `${base}&view=1` : `${base}?view=1`
+}
+
 type State = {
   screen: Screen
   photos: Photo[]
@@ -19,6 +36,7 @@ type State = {
   lightbox: Photo | null
   loadingGallery: boolean
   booting: boolean
+  viewOnly: boolean
 }
 
 const state: State = {
@@ -34,6 +52,7 @@ const state: State = {
   lightbox: null,
   loadingGallery: false,
   booting: true,
+  viewOnly: detectViewOnly(),
 }
 
 function toast(msg: string): void {
@@ -95,6 +114,9 @@ async function refreshGallery(): Promise<void> {
 }
 
 function go(screen: Screen): void {
+  if (state.viewOnly && (screen === 'capture' || screen === 'review' || screen === 'setup')) {
+    screen = 'gallery'
+  }
   state.screen = screen
   state.error = ''
   render()
@@ -102,6 +124,7 @@ function go(screen: Screen): void {
 }
 
 function onPhotoFile(file: File): void {
+  if (state.viewOnly) return
   discardDraft()
   state.draft = {
     blob: file,
@@ -115,7 +138,7 @@ function onPhotoFile(file: File): void {
 }
 
 async function doUpload(skipCaption = false): Promise<void> {
-  if (!state.draft || state.busy) return
+  if (state.viewOnly || !state.draft || state.busy) return
   state.busy = true
   state.error = ''
   render()
@@ -135,7 +158,7 @@ async function doUpload(skipCaption = false): Promise<void> {
 }
 
 async function doDelete(photo: Photo): Promise<void> {
-  if (state.busy) return
+  if (state.viewOnly || state.busy) return
   if (!window.confirm('Remove this photo from the class wall?')) return
   state.busy = true
   state.error = ''
@@ -173,18 +196,35 @@ function renderUnlock(): string {
     </div>
   </div>`
   }
+  const heading = state.viewOnly ? 'Enter class PIN to view the wall' : 'Enter class PIN'
+  const blurb = state.viewOnly
+    ? 'View-only link — enter the class PIN your teacher shared.'
+    : 'Same PIN for viewing the wall and uploading photos.'
   return `<div class="screen gate">
     ${topbar('Class Photo Wall', '', '')}
     <div class="body gate-body">
       <div class="hero-card">
-        <p class="eyebrow">Parents &amp; teachers</p>
-        <h2>Enter class PIN</h2>
-        <p class="muted">Same PIN for viewing the wall and uploading photos.</p>
+        <p class="eyebrow">${state.viewOnly ? 'Parents' : 'Parents &amp; teachers'}</p>
+        <h2>${heading}</h2>
+        <p class="muted">${blurb}</p>
         <form id="pin-form" class="pin-form">
           <input id="pin-input" class="pin-input" type="password" inputmode="numeric" autocomplete="one-time-code" placeholder="Class PIN" maxlength="32" value="${escapeHtml(state.pinInput)}" />
           ${state.error ? `<p class="error">${escapeHtml(state.error)}</p>` : ''}
           <button class="btn primary big" type="submit" ${state.busy ? 'disabled' : ''}>Unlock</button>
         </form>
+      </div>
+    </div>
+  </div>`
+}
+
+function renderWaiting(): string {
+  return `<div class="screen gate">
+    ${topbar('Class Photo Wall', '', '')}
+    <div class="body gate-body">
+      <div class="hero-card">
+        <p class="eyebrow">View only</p>
+        <h2>Photo wall isn’t ready yet</h2>
+        <p class="muted">Ask your teacher for the class link PIN — wall not set up yet. Your teacher will share the PIN after they create it on the full teacher link.</p>
       </div>
     </div>
   </div>`
@@ -221,46 +261,71 @@ function renderGallery(): string {
     .join('')
 
   const empty = !state.loadingGallery && state.photos.length === 0
-    ? `<div class="empty-wall">
+    ? state.viewOnly
+      ? `<div class="empty-wall">
+        <div class="empty-art" aria-hidden="true">📷</div>
+        <h2>Class photo wall</h2>
+        <p class="muted">No photos yet. Check back after your teacher adds snapshots.</p>
+      </div>`
+      : `<div class="empty-wall">
         <div class="empty-art" aria-hidden="true">📷</div>
         <h2>Your class photo wall</h2>
-        <p class="muted">Tap <strong>Take photo</strong> to add the first snapshot. Parents open this same link and enter the class PIN.</p>
+        <p class="muted">Tap <strong>Take photo</strong> to add the first snapshot. Parents open the parent link and enter the class PIN.</p>
       </div>`
     : ''
+
+  const chips = state.viewOnly
+    ? `<div class="chip-row">
+        <div class="mode-chip view-only">View only</div>
+        <div class="mode-chip ${mode}">${mode === 'supabase' ? 'Cloud gallery' : 'Demo mode (this device)'}</div>
+      </div>`
+    : `<div class="mode-chip ${mode}">${mode === 'supabase' ? 'Cloud gallery' : 'Demo mode (this device)'}</div>`
+
+  const settingsBtn = state.viewOnly
+    ? `<button type="button" class="icon-btn ghost" id="btn-settings">Settings</button>`
+    : `<button type="button" class="icon-btn ghost" id="btn-settings">Settings</button>`
+
+  const fab = state.viewOnly
+    ? ''
+    : `<div class="fab-bar">
+      <button type="button" class="btn primary big fab" id="btn-capture">Take photo</button>
+    </div>`
 
   return `<div class="screen">
     ${topbar(
       'Class Photo Wall',
-      `<button type="button" class="icon-btn ghost" id="btn-settings">Settings</button>`,
+      settingsBtn,
       `<button type="button" class="icon-btn ghost" id="btn-lock">Lock</button>`,
     )}
-    <div class="body gallery-body">
-      <div class="mode-chip ${mode}">${mode === 'supabase' ? 'Cloud gallery' : 'Demo mode (this device)'}</div>
+    <div class="body gallery-body${state.viewOnly ? ' view-only' : ''}">
+      ${chips}
       ${state.error ? `<p class="error">${escapeHtml(state.error)}</p>` : ''}
       ${state.loadingGallery ? `<p class="muted center">Loading wall…</p>` : ''}
       ${empty}
       <div class="masonry">${tiles}</div>
     </div>
-    <div class="fab-bar">
-      <button type="button" class="btn primary big fab" id="btn-capture">Take photo</button>
-    </div>
+    ${fab}
     ${state.lightbox ? renderLightbox(state.lightbox) : ''}
   </div>`
 }
 
 function renderLightbox(photo: Photo): string {
+  const deleteBtn = state.viewOnly
+    ? ''
+    : `<button type="button" class="btn danger" id="lightbox-delete" ${state.busy ? 'disabled' : ''}>Remove photo</button>`
   return `<div class="lightbox" id="lightbox" role="dialog" aria-modal="true">
     <button type="button" class="lightbox-close" id="lightbox-close" aria-label="Close">×</button>
     <img src="${escapeHtml(photo.url)}" alt="" />
     <div class="lightbox-meta">
       <p class="lightbox-cap">${photo.caption ? escapeHtml(photo.caption) : '<span class="muted">No caption</span>'}</p>
       <p class="muted">${escapeHtml(formatWhen(photo.createdAt))}</p>
-      <button type="button" class="btn danger" id="lightbox-delete" ${state.busy ? 'disabled' : ''}>Remove photo</button>
+      ${deleteBtn}
     </div>
   </div>`
 }
 
 function renderCapture(): string {
+  if (state.viewOnly) return renderGallery()
   return `<div class="screen">
     ${topbar(
       'Take a photo',
@@ -283,7 +348,7 @@ function renderCapture(): string {
 }
 
 function renderReview(): string {
-  if (!state.draft) return renderCapture()
+  if (state.viewOnly || !state.draft) return state.viewOnly ? renderGallery() : renderCapture()
   return `<div class="screen">
     ${topbar(
       'Add to wall',
@@ -310,8 +375,27 @@ function renderReview(): string {
 }
 
 function renderSettings(): string {
+  if (state.viewOnly) {
+    return `<div class="screen">
+    ${topbar(
+      'Settings',
+      `<button type="button" class="icon-btn ghost" id="btn-back-gallery">Back</button>`,
+      '',
+    )}
+    <div class="body">
+      <section class="card">
+        <div class="mode-chip view-only">View only</div>
+        <h2>Parent gallery</h2>
+        <p class="muted">You’re on the view-only link. Photos can be added from the teacher link.</p>
+        <button type="button" class="btn secondary" id="btn-lock">Lock</button>
+      </section>
+    </div>
+  </div>`
+  }
+
   const mode = getStorageMode()
-  const link = `${location.origin}${import.meta.env.BASE_URL}`
+  const teacherLink = galleryBaseUrl()
+  const parentLink = parentViewUrl()
   return `<div class="screen">
     ${topbar(
       'Settings',
@@ -321,9 +405,13 @@ function renderSettings(): string {
     <div class="body">
       <section class="card">
         <h2>Share with parents</h2>
-        <p class="muted">Send this link. They enter the class PIN to view the wall.</p>
-        <p class="share-link">${escapeHtml(link)}</p>
-        <button type="button" class="btn secondary" id="btn-copy-link">Copy gallery link</button>
+        <p class="muted">Send the <strong>parent link</strong> below. They enter the class PIN to view the wall (no upload).</p>
+        <p class="share-label">Parent link (view only)</p>
+        <p class="share-link">${escapeHtml(parentLink)}</p>
+        <button type="button" class="btn primary" id="btn-copy-parent-link">Copy parent link</button>
+        <p class="share-label">Teacher link (full app)</p>
+        <p class="share-link">${escapeHtml(teacherLink)}</p>
+        <button type="button" class="btn secondary" id="btn-copy-link">Copy teacher link</button>
       </section>
       <section class="card">
         <h2>Class PIN</h2>
@@ -360,6 +448,9 @@ function render(): void {
     case 'unlock':
       html = renderUnlock()
       break
+    case 'waiting':
+      html = renderWaiting()
+      break
     case 'setup':
       html = renderSetup()
       break
@@ -381,6 +472,15 @@ function render(): void {
   }
   app.innerHTML = html
   bind()
+}
+
+async function copyText(text: string, okMsg: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text)
+    toast(okMsg)
+  } catch {
+    window.prompt('Copy this link:', text)
+  }
 }
 
 function bind(): void {
@@ -406,6 +506,7 @@ function bind(): void {
   const setupForm = document.getElementById('setup-form') as HTMLFormElement | null
   setupForm?.addEventListener('submit', async (e) => {
     e.preventDefault()
+    if (state.viewOnly) return
     const a = (document.getElementById('pin-input') as HTMLInputElement).value
     const b = (document.getElementById('pin-confirm') as HTMLInputElement).value
     state.pinInput = a
@@ -438,6 +539,7 @@ function bind(): void {
   const changePin = document.getElementById('change-pin-form') as HTMLFormElement | null
   changePin?.addEventListener('submit', async (e) => {
     e.preventDefault()
+    if (state.viewOnly) return
     const a = (document.getElementById('pin-input') as HTMLInputElement).value
     const b = (document.getElementById('pin-confirm') as HTMLInputElement).value
     if (a.trim().length < 4) {
@@ -467,9 +569,12 @@ function bind(): void {
     state.pinInput = ''
     go('unlock')
   })
-  document.getElementById('btn-capture')?.addEventListener('click', () => go('capture'))
+  document.getElementById('btn-capture')?.addEventListener('click', () => {
+    if (!state.viewOnly) go('capture')
+  })
   document.getElementById('btn-back-gallery')?.addEventListener('click', () => go('gallery'))
   document.getElementById('btn-retake')?.addEventListener('click', () => {
+    if (state.viewOnly) return
     discardDraft()
     go('capture')
   })
@@ -515,17 +620,14 @@ function bind(): void {
     }
   })
   document.getElementById('lightbox-delete')?.addEventListener('click', () => {
-    if (state.lightbox) void doDelete(state.lightbox)
+    if (!state.viewOnly && state.lightbox) void doDelete(state.lightbox)
   })
 
-  document.getElementById('btn-copy-link')?.addEventListener('click', async () => {
-    const link = `${location.origin}${import.meta.env.BASE_URL}`
-    try {
-      await navigator.clipboard.writeText(link)
-      toast('Link copied')
-    } catch {
-      window.prompt('Copy this gallery link:', link)
-    }
+  document.getElementById('btn-copy-link')?.addEventListener('click', () => {
+    void copyText(galleryBaseUrl(), 'Teacher link copied')
+  })
+  document.getElementById('btn-copy-parent-link')?.addEventListener('click', () => {
+    void copyText(parentViewUrl(), 'Parent link copied')
   })
 }
 
@@ -534,7 +636,7 @@ async function boot(): Promise<void> {
   const has = await resolvePinPresence()
   state.booting = false
   if (!has) {
-    state.screen = 'setup'
+    state.screen = state.viewOnly ? 'waiting' : 'setup'
   } else if (isUnlocked()) {
     state.screen = 'gallery'
   } else {

@@ -200,6 +200,24 @@ body {
   border-color: #9ad9cb;
   color: #0d6b5c;
 }
+.mode-chip.view-only {
+  background: #fff4e0;
+  border-color: #f0c98a;
+  color: #8a5a12;
+}
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.gallery-body.view-only { padding-bottom: 24px; }
+.share-label {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--navy);
+}
 
 .masonry {
   columns: 2;

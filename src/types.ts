@@ -1,4 +1,4 @@
-export type Screen = 'unlock' | 'setup' | 'gallery' | 'capture' | 'review' | 'settings'
+export type Screen = 'unlock' | 'setup' | 'waiting' | 'gallery' | 'capture' | 'review' | 'settings'
 
 export type Photo = {
   id: string
