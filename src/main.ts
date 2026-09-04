@@ -1,7 +1,7 @@
 import './style.css'
 import { registerSW } from 'virtual:pwa-register'
 import type { Photo, PhotoDraft, Screen } from './types'
-import { hasPin, isUnlocked, lockSession, setPin, verifyPin } from './pin'
+import { isUnlocked, lockSession, resolvePinPresence, setPin, verifyPin } from './pin'
 import { getStorageMode, listPhotos, removePhoto, uploadPhoto } from './storage'
 
 registerSW({ immediate: true })
@@ -18,10 +18,11 @@ type State = {
   error: string
   lightbox: Photo | null
   loadingGallery: boolean
+  booting: boolean
 }
 
 const state: State = {
-  screen: !hasPin() ? 'setup' : isUnlocked() ? 'gallery' : 'unlock',
+  screen: 'unlock',
   photos: [],
   draft: null,
   caption: '',
@@ -32,6 +33,7 @@ const state: State = {
   error: '',
   lightbox: null,
   loadingGallery: false,
+  booting: true,
 }
 
 function toast(msg: string): void {
@@ -161,6 +163,16 @@ function topbar(title: string, left: string, right: string): string {
 }
 
 function renderUnlock(): string {
+  if (state.booting) {
+    return `<div class="screen gate">
+    ${topbar('Class Photo Wall', '', '')}
+    <div class="body gate-body">
+      <div class="hero-card">
+        <p class="muted center">Loading…</p>
+      </div>
+    </div>
+  </div>`
+  }
   return `<div class="screen gate">
     ${topbar('Class Photo Wall', '', '')}
     <div class="body gate-body">
@@ -185,7 +197,7 @@ function renderSetup(): string {
       <div class="hero-card">
         <p class="eyebrow">Teacher setup</p>
         <h2>Create a class PIN</h2>
-        <p class="muted">Parents will use this PIN to open the shared gallery. Store it somewhere safe for your class.</p>
+        <p class="muted">This PIN is shared for the whole class link. Parents on any device enter it to open the gallery. Store it somewhere safe.</p>
         <form id="setup-form" class="pin-form">
           <input id="pin-input" class="pin-input" type="password" inputmode="numeric" autocomplete="new-password" placeholder="New PIN (4+ chars)" maxlength="32" value="${escapeHtml(state.pinInput)}" />
           <input id="pin-confirm" class="pin-input" type="password" inputmode="numeric" autocomplete="new-password" placeholder="Confirm PIN" maxlength="32" value="${escapeHtml(state.pinConfirm)}" />
@@ -315,7 +327,7 @@ function renderSettings(): string {
       </section>
       <section class="card">
         <h2>Class PIN</h2>
-        <p class="muted">One PIN unlocks viewing and uploading on this browser.</p>
+        <p class="muted">One PIN unlocks viewing and uploading for the whole class link on every device.</p>
         <form id="change-pin-form" class="pin-form">
           <input id="pin-input" class="pin-input" type="password" inputmode="numeric" autocomplete="new-password" placeholder="New PIN" maxlength="32" />
           <input id="pin-confirm" class="pin-input" type="password" inputmode="numeric" autocomplete="new-password" placeholder="Confirm new PIN" maxlength="32" />
@@ -517,5 +529,19 @@ function bind(): void {
   })
 }
 
-render()
-if (state.screen === 'gallery') void refreshGallery()
+async function boot(): Promise<void> {
+  render()
+  const has = await resolvePinPresence()
+  state.booting = false
+  if (!has) {
+    state.screen = 'setup'
+  } else if (isUnlocked()) {
+    state.screen = 'gallery'
+  } else {
+    state.screen = 'unlock'
+  }
+  render()
+  if (state.screen === 'gallery') void refreshGallery()
+}
+
+void boot()

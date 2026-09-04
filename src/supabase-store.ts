@@ -32,6 +32,39 @@ function publicUrl(path: string): string {
   return `${url}/storage/v1/object/public/class-photos/${path}`
 }
 
+export async function fetchCloudPinHash(): Promise<string | null> {
+  const { url } = config()
+  const res = await fetch(`${url}/rest/v1/wall_config?id=eq.1&select=pin_hash`, {
+    headers: headers({ Accept: 'application/json' }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Could not load class PIN (${res.status}): ${text.slice(0, 160)}`)
+  }
+  const rows = (await res.json()) as { pin_hash: string }[]
+  return rows[0]?.pin_hash ?? null
+}
+
+export async function saveCloudPinHash(pinHash: string): Promise<void> {
+  const { url } = config()
+  const res = await fetch(`${url}/rest/v1/wall_config`, {
+    method: 'POST',
+    headers: headers({
+      'Content-Type': 'application/json',
+      Prefer: 'resolution=merge-duplicates,return=minimal',
+    }),
+    body: JSON.stringify({
+      id: 1,
+      pin_hash: pinHash,
+      updated_at: new Date().toISOString(),
+    }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Could not save class PIN (${res.status}): ${text.slice(0, 160)}`)
+  }
+}
+
 export async function listCloudPhotos(): Promise<Photo[]> {
   const { url } = config()
   const res = await fetch(
